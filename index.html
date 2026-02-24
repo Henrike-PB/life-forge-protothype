@@ -422,6 +422,15 @@ const LF = {
       // Enable persistence for offline support
       this.db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
 
+      // Handle redirect result (if coming back from Google login)
+      this.auth.getRedirectResult().catch(e => {
+        if (e.code !== 'auth/no-auth-event') {
+          console.error('Redirect error:', e);
+          const errEl = document.getElementById('auth-error');
+          if (errEl) { errEl.textContent = 'Erro redirect: ' + e.message; errEl.style.display = 'block'; }
+        }
+      });
+
       // Auth state listener
       this.auth.onAuthStateChanged(user => {
         if (user) {
@@ -443,8 +452,6 @@ const LF = {
     document.getElementById('topbar').classList.remove('show');
     document.getElementById('main-nav').classList.remove('show');
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-
-    document.getElementById('google-login-btn').onclick = () => this.loginGoogle();
   },
 
   async loginGoogle() {
@@ -455,12 +462,23 @@ const LF = {
 
     try {
       const provider = new firebase.auth.GoogleAuthProvider();
-      await this.auth.signInWithPopup(provider);
+      // Try popup first, fallback to redirect
+      try {
+        await this.auth.signInWithPopup(provider);
+      } catch (popupErr) {
+        if (popupErr.code === 'auth/popup-blocked' || popupErr.code === 'auth/cancelled-popup-request') {
+          loadEl.textContent = 'Redirecionando para login...';
+          await this.auth.signInWithRedirect(provider);
+        } else {
+          throw popupErr;
+        }
+      }
     } catch (e) {
       loadEl.style.display = 'none';
       if (e.code === 'auth/popup-closed-by-user') return;
-      errorEl.textContent = 'Erro: ' + e.message;
+      errorEl.textContent = 'Erro: ' + (e.code || '') + ' — ' + e.message;
       errorEl.style.display = 'block';
+      console.error('Auth error:', e);
     }
   },
 
@@ -936,7 +954,11 @@ const LF = {
 if('Notification' in window) Notification.requestPermission();
 
 // Boot
-document.addEventListener('DOMContentLoaded',()=>LF.init());
+document.addEventListener('DOMContentLoaded',()=>{
+  // Set up login button handler immediately
+  document.getElementById('google-login-btn').addEventListener('click', () => LF.loginGoogle());
+  LF.init();
+});
 </script>
 </body>
 </html>
